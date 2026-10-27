@@ -440,3 +440,34 @@ test('moment().lang with missing key doesn\'t change locale', function (assert) 
             'preserve global locale in case of bad locale id');
 });
 
+test('library does not lazy load locales from path-looking names', function (assert) {
+    var jan = moment([2000, 0]);
+
+    // Locale modules are only lazy loaded (with require) when running under node.
+    if (typeof process === 'undefined' || typeof require !== 'function') {
+        assert.ok(true, 'locales are not lazy loaded in this environment');
+        return;
+    }
+
+    // Requiring the real sv locale through a path-looking name would
+    // overwrite these sentinel months.
+    moment.defineLocale('sv', {months : 'sentinel_b_c_d_e_f_g_h_i_j_k_l'.split('_')});
+    moment.locale('en');
+
+    each(['../locale/sv', './sv', 'sv/../sv', '/sv', '..\\locale\\sv', 'sv\\..\\sv'], function (name) {
+        moment.locale(name);
+        moment.locale([name]);
+        moment.localeData(name);
+        moment().locale(name);
+        moment.duration(1000).locale(name);
+    });
+
+    assert.equal(moment.locale(), 'en', 'path-looking locale names do not change the global locale');
+    assert.equal(moment.localeData('sv').months(jan), 'sentinel', 'path-looking locale names are not required');
+
+    moment.defineLocale('sv', null);
+    moment.locale('en');
+    assert.equal(moment.localeData('sv').months(jan), 'januari', 'a canonical locale name is still lazy loaded');
+    assert.equal(moment.locale(), 'en', 'lazy loading a locale does not change the global locale');
+});
+
