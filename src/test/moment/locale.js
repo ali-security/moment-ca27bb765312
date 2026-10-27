@@ -63,6 +63,26 @@ test('library getters and setters', function (assert) {
 
     moment.locale('EN_gb');
     assert.equal(moment.locale(), 'en-gb', 'Normalize locale key underscore');
+    assert.equal(moment.localeData('EN_gb')._abbr, 'en-gb', 'Do not cache the unnormalized locale key');
+    assert.equal(moment.localeData('en_gb')._abbr, 'en-gb', 'Do not cache a partially normalized locale key');
+});
+
+test('preserve exact custom locale names', function (assert) {
+    moment.defineLocale('Mixed_Custom', {months : ['Movember']});
+
+    assert.equal(moment.localeData('Mixed_Custom')._abbr, 'Mixed_Custom', 'finds a custom locale before normalizing its name');
+    assert.equal(moment.locale(), 'Mixed_Custom', 'sets a custom locale using its exact name');
+
+    moment.defineLocale('Mixed_Custom', null);
+});
+
+test('do not load invalid built-in locale names', function (assert) {
+    var invalidNames = ['.', '..', 'locale name', 'en@gb'];
+
+    each(invalidNames, function (name) {
+        assert.equal(moment.localeData(name), null, 'does not load invalid locale name "' + name + '"');
+        assert.equal(moment.locale(name), 'en', 'does not switch to invalid locale name "' + name + '"');
+    });
 });
 
 test('library setter array of locales', function (assert) {
@@ -85,6 +105,108 @@ test('library getter locale array and substrings', function (assert) {
     assert.equal(moment.locale(['fake-CA', 'fake-MX', 'fr']), 'fr', 'always find something if possible');
     assert.equal(moment.locale(['fake-CA', 'fake-MX', 'fr-fake-fake-fake']), 'fr', 'always find something if possible');
     assert.equal(moment.locale(['en', 'en-CA']), 'en', 'prefer earlier if it works');
+});
+
+// Locale modules are only lazy loaded (with require) when running under node.
+function lazyLoadsLocales() {
+    return typeof process !== 'undefined' && typeof require === 'function';
+}
+
+function tryLocaleName(name) {
+    moment.locale(name);
+    moment.locale([name]);
+    moment.localeData(name);
+    moment().locale(name);
+    moment().locale([name]);
+    moment.duration(1000).locale(name);
+}
+
+test('library does not load locale names that look like paths', function (assert) {
+    var jan = moment([2000, 0]);
+
+    if (!lazyLoadsLocales()) {
+        assert.ok(true, 'locales are not lazy loaded in this environment');
+        return;
+    }
+
+    // Requiring the real uz locale (directly or through min/locales) would
+    // overwrite the sentinel months.
+    moment.defineLocale('uz', {months : 'sentinel_b_c_d_e_f_g_h_i_j_k_l'.split('_')});
+    moment.locale('en');
+
+    each(['../locale/uz', '../min/locales', './uz', 'uz/../uz', '/uz', '..\\locale\\uz', 'uz\\..\\uz'], tryLocaleName);
+
+    assert.equal(moment.locale(), 'en', 'path-looking locale names do not change the global locale');
+    assert.equal(moment.localeData('uz').months(jan), 'sentinel', 'path-looking locale names are not required');
+
+    moment.defineLocale('uz', null);
+    moment.locale('en');
+    assert.equal(moment.localeData('uz').months(jan), 'январь', 'a canonical locale name is still lazy loaded');
+    assert.equal(moment.locale(), 'en', 'lazy loading a locale does not change the global locale');
+});
+
+test('library does not load non-string locale names', function (assert) {
+    var jan = moment([2000, 0]);
+
+    // An object that defeats name.match() based checks and coerces to a path.
+    function craftedName(path, lowerCaseResult) {
+        var name = {};
+        name.toString = function () {
+            return path;
+        };
+        name.match = function () {
+            return [path];
+        };
+        name.toLowerCase = function () {
+            return lowerCaseResult === undefined ? name : lowerCaseResult;
+        };
+        name.replace = function () {
+            return name;
+        };
+        name.split = function () {
+            return [path];
+        };
+        return name;
+    }
+
+    if (!lazyLoadsLocales()) {
+        assert.ok(true, 'locales are not lazy loaded in this environment');
+        return;
+    }
+
+    // Requiring the real vi locale (directly or through min/locales) would
+    // overwrite the sentinel months.
+    moment.defineLocale('vi', {months : 'sentinel_b_c_d_e_f_g_h_i_j_k_l'.split('_')});
+    moment.locale('en');
+
+    each([
+        craftedName('../min/locales'),
+        craftedName('../locale/vi'),
+        craftedName('../min/locales', '../min/locales'),
+        craftedName('../locale/vi', '../locale/vi')
+    ], tryLocaleName);
+
+    assert.equal(moment.locale(), 'en', 'crafted locale names do not change the global locale');
+    assert.equal(moment.localeData('vi').months(jan), 'sentinel', 'crafted locale names never reach require');
+
+    moment.defineLocale('vi', null);
+    moment.locale('en');
+    assert.equal(moment.locale('vi'), 'vi', 'a canonical locale name is still lazy loaded');
+    assert.equal(moment.localeData().months(jan), 'tháng 1', 'the lazy loaded locale is the real one');
+    moment.locale('en');
+
+    // fr is already loaded by the module setup, so forget it (and its cached
+    // module) to show that a plain string locale name is still lazy loaded.
+    moment.defineLocale('fr', null);
+    each(Object.keys(require.cache), function (file) {
+        if (/umd[\/\\]locale[\/\\]fr\.js$/.test(file)) {
+            delete require.cache[file];
+        }
+    });
+    moment.locale('en');
+    assert.equal(moment.locale('fr'), 'fr', 'a string locale name is still lazy loaded');
+    assert.equal(moment.localeData().months(jan), 'janvier', 'the lazy loaded string locale is the real one');
+    moment.locale('en');
 });
 
 test('library ensure inheritance', function (assert) {
